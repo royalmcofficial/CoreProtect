@@ -3,6 +3,7 @@ package net.coreprotect.database.logger;
 import java.sql.PreparedStatement;
 import java.util.Locale;
 
+import net.coreprotect.event.CoreProtectChatPreLogEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 
@@ -34,7 +35,12 @@ public class CommandLogger {
                 CoreProtect.getInstance().getServer().getPluginManager().callEvent(event);
             }
 
-            if (event.isCancelled()) {
+            CoreProtectChatPreLogEvent chatPreLogEvent = new CoreProtectChatPreLogEvent(user, message, location, true);
+            if (Config.getGlobal().API_ENABLED && !Bukkit.isPrimaryThread()) {
+                CoreProtect.getInstance().getServer().getPluginManager().callEvent(chatPreLogEvent);
+            }
+
+            if (chatPreLogEvent.isCancelled() || event.isCancelled()) {
                 return;
             }
 

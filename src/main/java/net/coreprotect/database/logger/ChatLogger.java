@@ -3,6 +3,10 @@ package net.coreprotect.database.logger;
 import java.sql.PreparedStatement;
 import java.util.Locale;
 
+import net.coreprotect.CoreProtect;
+import net.coreprotect.config.Config;
+import net.coreprotect.event.CoreProtectChatPreLogEvent;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 
 import net.coreprotect.config.ConfigHandler;
@@ -20,6 +24,15 @@ public class ChatLogger {
             if (ConfigHandler.blacklist.get(user.toLowerCase(Locale.ROOT)) != null) {
                 return;
             }
+
+            CoreProtectChatPreLogEvent event = new CoreProtectChatPreLogEvent(user, message, location, false);
+
+            if (Config.getGlobal().API_ENABLED && !Bukkit.isPrimaryThread()) {
+                CoreProtect.getInstance().getServer().getPluginManager().callEvent(event);
+            }
+
+            if (event.isCancelled()) return;
+
             int x = location.getBlockX();
             int y = location.getBlockY();
             int z = location.getBlockZ();
