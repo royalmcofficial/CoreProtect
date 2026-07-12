@@ -19,9 +19,11 @@ import net.coreprotect.listener.ListenerHandler;
 import net.coreprotect.thread.CacheHandler;
 import net.coreprotect.thread.NetworkHandler;
 import net.coreprotect.thread.Scheduler;
+import net.coreprotect.thread.TickTimeMonitor;
 import net.coreprotect.utility.Chat;
 import net.coreprotect.utility.ChatUtils;
 import net.coreprotect.utility.Extensions;
+import net.coreprotect.utility.EntitySpawnTracking;
 import net.coreprotect.utility.ErrorReporter;
 
 /**
@@ -149,12 +151,16 @@ public class PluginInitializationService {
             }
         }, 0);
 
+        // Start tick time monitor (only used where native tick timings are unavailable)
+        TickTimeMonitor.initialize(plugin);
+
         // Start cache cleanup thread
         Thread cacheCleanUpThread = new Thread(new CacheHandler());
         cacheCleanUpThread.start();
 
         // Start consumer
         Consumer.startConsumer();
+        EntitySpawnTracking.initializeLoadedEntities();
 
         Extensions.startBackgroundService();
     }

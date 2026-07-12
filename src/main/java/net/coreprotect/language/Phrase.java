@@ -52,6 +52,8 @@ public enum Phrase {
     HELP_COMMAND,
     HELP_EXCLUDE_1,
     HELP_EXCLUDE_2,
+    HELP_FILTER_1,
+    HELP_FILTER_2,
     HELP_HEADER,
     HELP_INCLUDE_1,
     HELP_INCLUDE_2,
@@ -137,6 +139,7 @@ public enum Phrase {
     LOOKUP_TIME,
     LOOKUP_USERNAME,
     MAXIMUM_RADIUS,
+    MESSAGE_FILTER_TOO_SHORT,
     MISSING_ACTION_USER,
     MISSING_LOOKUP_TIME,
     MISSING_LOOKUP_USER,
@@ -229,7 +232,9 @@ public enum Phrase {
     VERSION_NOTICE,
     VERSION_INCOMPATIBLE,
     VERSION_REQUIRED,
-    WORLD_NOT_FOUND;
+    WORLD_NOT_FOUND,
+    LOOKUP_ENTITY_SPAWN,
+    LOOKUP_ENTITY_ORIGIN;
 
     final private static Set<Phrase> HEADERS = new HashSet<>(Arrays.asList(Phrase.CONTAINER_HEADER, Phrase.HELP_HEADER, Phrase.INTERACTIONS_HEADER, Phrase.LOOKUP_HEADER, Phrase.SIGN_HEADER, Phrase.UPDATE_HEADER));
     final private static Set<String> COLORS = new HashSet<>(Arrays.asList(Color.WHITE, Color.DARK_AQUA));

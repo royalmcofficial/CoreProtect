@@ -6,7 +6,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -17,39 +16,55 @@ import org.bukkit.inventory.ItemStack;
 
 import net.coreprotect.config.ConfigHandler;
 import net.coreprotect.consumer.Consumer;
+import net.coreprotect.consumer.Queue;
 import net.coreprotect.database.logger.ContainerLogger;
+import net.coreprotect.model.entity.EntityContainerTransaction;
+import net.coreprotect.model.entity.EntitySpawnIdentity;
+import net.coreprotect.utility.HopperTransactionUtils;
 
 class ContainerTransactionProcess {
+
+    static boolean processEntity(PreparedStatement preparedStmtContainer, int batchCount, String user, Object object, EntitySpawnIdentity identity) {
+        if (!(object instanceof EntityContainerTransaction) || identity == null) {
+            return false;
+        }
+
+        ContainerLogger.logEntity(preparedStmtContainer, batchCount, user, identity, (EntityContainerTransaction) object);
+        return true;
+    }
 
     static void process(PreparedStatement preparedStmtContainer, PreparedStatement preparedStmtItems, int batchCount, int processId, int id, Material type, int forceData, String user, Object object) {
         if (object instanceof Location) {
             Location location = (Location) object;
             Map<Integer, Object> inventories = Consumer.consumerInventories.get(processId);
-            if (inventories.get(id) != null) {
-                Object inventory = inventories.get(id);
-                String transactingChestId = location.getWorld().getUID().toString() + "." + location.getBlockX() + "." + location.getBlockY() + "." + location.getBlockZ();
-                String loggingChestId = user.toLowerCase(Locale.ROOT) + "." + location.getBlockX() + "." + location.getBlockY() + "." + location.getBlockZ();
+            Object inventory = inventories.remove(id);
+            if (inventory != null) {
+                String transactingChestId = HopperTransactionUtils.getTransactionId(location);
+                String loggingChestIdSuffix = HopperTransactionUtils.getLoggingIdSuffix(location);
+                String loggingChestId = HopperTransactionUtils.getLoggingId(user, loggingChestIdSuffix);
                 if (ConfigHandler.loggingChest.get(loggingChestId) != null) {
                     int current_chest = ConfigHandler.loggingChest.get(loggingChestId);
                     if (ConfigHandler.oldContainer.get(loggingChestId) == null) {
+                        ConfigHandler.removeOldContainerViewer(loggingChestIdSuffix, loggingChestId);
+                        ConfigHandler.loggingChest.remove(loggingChestId);
+                        Queue.removeForceContainer(loggingChestId);
+                        HopperTransactionUtils.removeOwner(transactingChestId, loggingChestId);
                         return;
                     }
-                    int force_size = 0;
-                    if (ConfigHandler.forceContainer.get(loggingChestId) != null) {
-                        force_size = ConfigHandler.forceContainer.get(loggingChestId).size();
-                    }
+                    int force_size = Queue.getForceContainerSize(loggingChestId);
                     if (current_chest == forceData || force_size > 0) { // This prevents client side chest sorting mods from messing things up.
                         ContainerLogger.log(preparedStmtContainer, preparedStmtItems, batchCount, user, type, inventory, location);
                         List<ItemStack[]> old = ConfigHandler.oldContainer.get(loggingChestId);
                         if (old.size() == 0) {
                             ConfigHandler.oldContainer.remove(loggingChestId);
+                            ConfigHandler.removeOldContainerViewer(loggingChestIdSuffix, loggingChestId);
                             ConfigHandler.loggingChest.remove(loggingChestId);
-                            ConfigHandler.transactingChest.remove(transactingChestId);
+                            Queue.removeForceContainer(loggingChestId);
+                            HopperTransactionUtils.removeOwner(transactingChestId, loggingChestId);
                         }
                     }
                     else if (loggingChestId.startsWith("#hopper")) {
-                        List<Object> transactingChest = ConfigHandler.transactingChest.get(transactingChestId);
-                        if (force_size == 0 && ConfigHandler.oldContainer.getOrDefault(loggingChestId, Collections.synchronizedList(new ArrayList<>())).size() == 1 && transactingChest != null && transactingChest.isEmpty()) {
+                        if (force_size == 0 && ConfigHandler.oldContainer.getOrDefault(loggingChestId, Collections.synchronizedList(new ArrayList<>())).size() == 1 && HopperTransactionUtils.pendingDeltaCount(transactingChestId) == 0) {
                             int loopCount = ConfigHandler.loggingChest.getOrDefault(loggingChestId, 0);
                             int maxInventorySize = (99 * 54);
                             try {
@@ -84,7 +99,6 @@ class ContainerTransactionProcess {
                         }
                     }
                 }
-                inventories.remove(id);
             }
         }
     }
