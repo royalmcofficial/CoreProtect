@@ -1,9 +1,11 @@
 package net.coreprotect.consumer;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -17,6 +19,7 @@ import org.bukkit.block.data.Bisected.Half;
 import org.bukkit.block.data.Waterlogged;
 import org.bukkit.block.data.type.Bed;
 import org.bukkit.block.data.type.Bed.Part;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
@@ -30,15 +33,22 @@ import net.coreprotect.listener.block.BlockUtil;
 import net.coreprotect.model.BlockGroup;
 import net.coreprotect.model.entity.EntityContainerRollbackUpdate;
 import net.coreprotect.model.entity.EntityContainerTransaction;
+import net.coreprotect.model.entity.EntityInteraction;
+import net.coreprotect.model.entity.EntityInteractionAction;
+import net.coreprotect.model.entity.EntityInteractionOrigin;
 import net.coreprotect.model.entity.EntitySpawnData;
-import net.coreprotect.thread.Scheduler;
 import net.coreprotect.thread.CacheHandler;
+import net.coreprotect.thread.Scheduler;
 import net.coreprotect.utility.BlockUtils;
+import net.coreprotect.utility.EntitySpawnTracking;
 import net.coreprotect.utility.EntityUtils;
-import net.coreprotect.utility.WorldUtils;
 import net.coreprotect.utility.ErrorReporter;
+import net.coreprotect.utility.WorldUtils;
+import net.coreprotect.worldedit.WorldEditBlockState;
 
 public class Queue {
+
+    private static final int MAX_ROLLBACK_ROWS_PER_RECORD = 100_000;
 
     public static synchronized void addForceContainer(String id, ItemStack[] container) {
         if (container == null) {
@@ -58,13 +68,17 @@ public class Queue {
         ConfigHandler.forceContainer.put(id, forceList);
     }
 
-    public static synchronized ItemStack[] pollForceContainer(String id) {
+    public static ItemStack[] pollForceContainer(String id) {
+        return pollForceContainer(id, 0);
+    }
+
+    public static synchronized ItemStack[] pollForceContainer(String id, int index) {
         List<ItemStack[]> forceList = ConfigHandler.forceContainer.get(id);
         if (forceList == null) {
             return null;
         }
 
-        ItemStack[] container = forceList.isEmpty() ? null : forceList.remove(0);
+        ItemStack[] container = index < 0 || index >= forceList.size() ? null : forceList.remove(index);
         if (forceList.isEmpty()) {
             ConfigHandler.forceContainer.remove(id);
         }
@@ -92,20 +106,34 @@ public class Queue {
         return chestId;
     }
 
-    protected static synchronized int getItemId(String id) {
-        int chestId = ConfigHandler.loggingItem.getOrDefault(id, -1) + 1;
-        ConfigHandler.loggingItem.put(id, chestId);
-        return chestId;
+    // The Queue lock keeps ItemTransactionProcess.discard from clearing an item before its generation is registered,
+    // and compute keeps the append atomic with the consumer's take in ItemLogger
+    protected static synchronized int addPendingItems(ConcurrentHashMap<String, List<ItemStack>> pendingItems, String id, ItemStack... items) {
+        pendingItems.compute(id, (key, list) -> {
+            List<ItemStack> result = list == null ? new ArrayList<>(items.length) : list;
+            Collections.addAll(result, items);
+            return result;
+        });
+        int itemId = ConfigHandler.loggingItem.getOrDefault(id, -1) + 1;
+        ConfigHandler.loggingItem.put(id, itemId);
+        return itemId;
     }
 
-    private static void queueStandardData(Object[] data, String[] user, Object object, boolean first, long reservation) {
-        queueStandardData(data, user, object, first, null, null, reservation);
+    private static boolean queueStandardData(Object[] data, String[] user, Object object, boolean first, long reservation) {
+        return queueStandardData(data, user, object, first, null, null, reservation);
     }
 
-    private static synchronized <T> void queueStandardData(Object[] data, String[] user, Object object, boolean first, Map<Integer, ? extends Map<Integer, T>> additionalMaps, T additionalData, long reservation) {
+    private static synchronized <T> boolean queueStandardData(Object[] data, String[] user, Object object, boolean first, Map<Integer, ? extends Map<Integer, T>> additionalMaps, T additionalData, long reservation) {
+        boolean rollbackPublication = Process.isRollbackPublication((int) data[1], object);
+        if (Consumer.isPersistenceHalted()) {
+            Consumer.completeReservation(reservation, 1);
+            if (rollbackPublication) {
+                throw new IllegalStateException("Database persistence halted before rollback state could be queued");
+            }
+            return false;
+        }
         int currentConsumer = (int) (reservation >>> 32);
         int consumerId = (int) reservation;
-        boolean rollbackPublication = Process.isRollbackPublication((int) data[1], object);
         boolean published = false;
         if (rollbackPublication) {
             Consumer.registerRollbackPublications(1);
@@ -143,6 +171,7 @@ public class Queue {
                 Consumer.completeReservation(reservation, 1);
             }
         }
+        return published;
     }
 
     private static Location getBlockLocation(Location location) {
@@ -179,7 +208,7 @@ public class Queue {
             CreatureSpawner mobSpawner = (CreatureSpawner) block;
             extraData = EntityUtils.getSpawnerType(mobSpawner.getSpawnedType());
         }
-        else if (type != null && (type == Material.IRON_DOOR || BlockGroup.DOORS.contains(type) || type.equals(Material.SUNFLOWER) || type.equals(Material.LILAC) || type.equals(Material.TALL_GRASS) || type.equals(Material.LARGE_FERN) || type.equals(Material.ROSE_BUSH) || type.equals(Material.PEONY))) { // Double plant
+        else if (type != null && BlockGroup.LOGGED_BY_LOWER_HALF.contains(type)) { // Double plant
             if (block.getBlockData() instanceof Bisected) {
                 if (((Bisected) block.getBlockData()).getHalf().equals(Half.TOP)) {
                     if (blockNumber == 5) {
@@ -187,8 +216,8 @@ public class Queue {
                     }
 
                     if (block.getY() > BukkitAdapter.ADAPTER.getMinHeight(block.getWorld())) {
-                        block = block.getWorld().getBlockAt(block.getX(), block.getY() - 1, block.getZ()).getState();
-                        if (type != block.getType()) {
+                        block = block instanceof WorldEditBlockState ? ((WorldEditBlockState) block).getLowerHalf() : block.getWorld().getBlockAt(block.getX(), block.getY() - 1, block.getZ()).getState();
+                        if (block == null || type != block.getType()) {
                             return;
                         }
 
@@ -331,6 +360,54 @@ public class Queue {
         queueStandardData(new Object[] { null, Process.ENTITY_CONTAINER_TRANSACTION, null, 0, null, 0, 0, null }, new String[] { user, null }, transaction, false, Consumer.reserveConsumer());
     }
 
+    public static void queueEntityInteraction(String user, Entity entity, EntityInteractionAction action) {
+        queueEntityInteraction(user, entity, action, null);
+    }
+
+    public static void queueEntityInteraction(String user, Entity entity, EntityInteractionAction action, byte[] metadata) {
+        if (user == null || user.trim().isEmpty() || entity == null || action == null) {
+            return;
+        }
+        Location currentLocation = entity.getLocation();
+        EntityInteractionOrigin origin = EntitySpawnTracking.getOrCreateInteractionOrigin(entity);
+        if (origin == null || currentLocation.getWorld() == null) {
+            return;
+        }
+        boolean promotion = EntitySpawnTracking.beginDatabaseIdentityPromotion(entity);
+        EntityInteraction interaction = new EntityInteraction(entity.getUniqueId(), entity.getType(), origin, currentLocation, action, metadata).withIdentityPromotion(promotion);
+        queueEntityInteraction(user, interaction);
+    }
+
+    public static void queueEntityInteraction(String user, EntityInteraction interaction) {
+        if (user == null || user.trim().isEmpty() || interaction == null) {
+            if (interaction != null && interaction.hasIdentityPromotion()) {
+                EntitySpawnTracking.cancelDatabaseIdentityPromotion(interaction.getEntityUuid(), interaction.getCurrentLocation());
+            }
+            return;
+        }
+        queueReservedEntityInteraction(user, interaction, reserveEntityInteractionQueue());
+    }
+
+    protected static long reserveEntityInteractionQueue() {
+        return Consumer.reserveConsumer();
+    }
+
+    protected static void queueReservedEntityInteraction(String user, EntityInteraction interaction, long reservation) {
+        boolean queued = false;
+        try {
+            if (user == null || user.trim().isEmpty() || interaction == null) {
+                Consumer.completeReservation(reservation, 1);
+                return;
+            }
+            queued = queueStandardData(new Object[] { null, Process.ENTITY_INTERACTION, null, 0, null, 0, 0, null }, new String[] { user, null }, interaction, false, reservation);
+        }
+        finally {
+            if (!queued && interaction != null && interaction.hasIdentityPromotion()) {
+                EntitySpawnTracking.cancelDatabaseIdentityPromotion(interaction.getEntityUuid(), interaction.getCurrentLocation());
+            }
+        }
+    }
+
     protected static void queueItemTransaction(String user, Location location, int time, int offset, int itemId) {
         queueStandardData(new Object[] { null, Process.ITEM_TRANSACTION, null, offset, null, time, itemId, null }, new String[] { user, null }, location, false, Consumer.reserveConsumer());
     }
@@ -348,7 +425,11 @@ public class Queue {
     }
 
     public static void queueEntitySpawnLog(String user, java.util.UUID uuid, EntityType type, Location location) {
-        queueStandardData(new Object[] { null, Process.ENTITY_SPAWN_LOG, null, 0, null, 0, 0, null }, new String[] { user, null }, EntitySpawnData.log(uuid, type, location), false, Consumer.reserveConsumer());
+        queueEntitySpawnLog(user, EntitySpawnData.log(uuid, type, location));
+    }
+
+    public static void queueEntitySpawnLog(String user, EntitySpawnData spawnData) {
+        queueStandardData(new Object[] { null, Process.ENTITY_SPAWN_LOG, null, 0, null, 0, 0, null }, new String[] { user, null }, spawnData, false, Consumer.reserveConsumer());
     }
 
     public static void queueEntitySpawnLocation(java.util.UUID uuid, Location location, long verificationEpoch) {
@@ -356,7 +437,36 @@ public class Queue {
     }
 
     public static void queueEntitySpawnRemoved(java.util.UUID uuid, Location location) {
-        queueEntitySpawnUpdate(EntitySpawnData.removed(uuid, location));
+        if (uuid == null || location == null || location.getWorld() == null) {
+            return;
+        }
+        int worldId = WorldUtils.getWorldId(location.getWorld().getName());
+        if (worldId < 0) {
+            queueEntitySpawnUpdate(EntitySpawnData.removed(uuid, location));
+            return;
+        }
+        queueEntitySpawnRemoved(uuid, new EntityInteractionOrigin(worldId, location.getX(), location.getY(), location.getZ()), location);
+    }
+
+    public static void queueEntitySpawnRemoved(Entity entity) {
+        if (entity == null) {
+            return;
+        }
+        Location location = entity.getLocation();
+        EntityInteractionOrigin origin = EntitySpawnTracking.getOrCreateInteractionOrigin(entity);
+        if (location.getWorld() == null) {
+            return;
+        }
+        if (origin == null) {
+            queueEntitySpawnUpdate(EntitySpawnData.removed(entity.getUniqueId(), location));
+            return;
+        }
+        queueEntitySpawnRemoved(entity.getUniqueId(), origin, location);
+    }
+
+    private static void queueEntitySpawnRemoved(java.util.UUID uuid, EntityInteractionOrigin origin, Location location) {
+        int time = (int) (System.currentTimeMillis() / 1000L);
+        queueEntitySpawnUpdate(EntitySpawnData.removed(uuid, origin, location, time));
     }
 
     public static void queueEntitySpawnRevived(java.util.UUID previousUuid, java.util.UUID uuid, Location location) {
@@ -397,7 +507,11 @@ public class Queue {
     }
 
     protected static void queuePlayerInteraction(String user, BlockState block, Material type) {
-        queueStandardData(new Object[] { null, Process.PLAYER_INTERACTION, type, 0, null, 0, 0, null }, new String[] { user, null }, block, false, Consumer.reserveConsumer());
+        queuePlayerInteraction(user, block.getLocation(), type, block.getBlockData().getAsString());
+    }
+
+    protected static void queuePlayerInteraction(String user, Location location, Material type, String blockData) {
+        queueStandardData(new Object[] { null, Process.PLAYER_INTERACTION, type, 0, null, 0, 0, blockData }, new String[] { user, null }, getBlockLocation(location), false, Consumer.reserveConsumer());
     }
 
     protected static void queuePlayerKill(String user, Location location, String player) {
@@ -418,14 +532,14 @@ public class Queue {
             location = new Location(Bukkit.getServer().getWorlds().get(0), 0, 0, 0);
         }
 
-        queueStandardData(new Object[] { null, table, null, 0, null, 0, action, null }, new String[] { user, null }, location, false, Consumer.consumerObjectArrayList, list, Consumer.reserveConsumer());
+        queueRollbackUpdates(user, location, list, table, action, false);
     }
 
     public static void queueEntityContainerRollbackUpdate(String user, Location location, List<Object[]> rows, int rollbackType, boolean inventoryRollback) {
         if (location == null) {
             location = new Location(Bukkit.getServer().getWorlds().get(0), 0, 0, 0);
         }
-        queueStandardData(new Object[] { null, Process.ENTITY_CONTAINER_ROLLBACK_UPDATE, null, inventoryRollback ? 1 : 0, null, 0, rollbackType, null }, new String[] { user, null }, location, false, Consumer.consumerObjectArrayList, rows, Consumer.reserveConsumer());
+        queueRollbackUpdates(user, location, rows, Process.ENTITY_CONTAINER_ROLLBACK_UPDATE, rollbackType, inventoryRollback);
     }
 
     public static void queueEntityContainerRollbackUpdate(String user, EntitySpawnData transition, List<Object[]> rows, int rollbackType, boolean inventoryRollback) {
@@ -434,6 +548,9 @@ public class Queue {
     }
 
     public static synchronized void queueEntityRetriesFirst(List<EntityContainerRollbackUpdate> containerUpdates, List<EntitySpawnData> spawnUpdates) {
+        if (Consumer.isPersistenceHalted()) {
+            return;
+        }
         List<EntityContainerRollbackUpdate> containerRetries = new ArrayList<>(containerUpdates);
         List<EntitySpawnData> spawnRetries = new ArrayList<>(spawnUpdates);
         int updateCount = containerRetries.size() + spawnRetries.size();
@@ -490,6 +607,57 @@ public class Queue {
         }
     }
 
+    private static synchronized void queueRollbackUpdates(String user, Location location, List<Object[]> rows, int table, int action, boolean inventoryRollback) {
+        Objects.requireNonNull(rows, "rows");
+        if (rows.isEmpty()) {
+            return;
+        }
+        int recordCount = ((rows.size() - 1) / MAX_ROLLBACK_ROWS_PER_RECORD) + 1;
+        long reservation = Consumer.reserveConsumers(recordCount);
+        int currentConsumer = (int) (reservation >>> 32);
+        int firstConsumerId = (int) reservation;
+        List<Object[]> records = new ArrayList<>(recordCount);
+        boolean registered = false;
+        boolean published = false;
+        try {
+            if (Consumer.isPersistenceHalted()) {
+                throw new IllegalStateException("Database persistence halted before rollback state could be queued");
+            }
+            Consumer.registerRollbackPublications(recordCount);
+            registered = true;
+            for (int recordIndex = 0; recordIndex < recordCount; recordIndex++) {
+                int fromIndex = recordIndex * MAX_ROLLBACK_ROWS_PER_RECORD;
+                int toIndex = Math.min(fromIndex + MAX_ROLLBACK_ROWS_PER_RECORD, rows.size());
+                int consumerId = firstConsumerId + recordIndex;
+                records.add(new Object[] { consumerId, table, null, inventoryRollback ? 1 : 0, null, 0, action, null });
+                Consumer.consumerUsers.get(currentConsumer).put(consumerId, new String[] { user, null });
+                Consumer.consumerObjects.get(currentConsumer).put(consumerId, location);
+                Consumer.consumerObjectArrayList.get(currentConsumer).put(consumerId, new ArrayList<>(rows.subList(fromIndex, toIndex)));
+            }
+            Consumer.consumer.get(currentConsumer).addAll(records);
+            published = true;
+        }
+        finally {
+            try {
+                if (!published) {
+                    Consumer.consumer.get(currentConsumer).removeAll(records);
+                    for (int recordIndex = 0; recordIndex < recordCount; recordIndex++) {
+                        int consumerId = firstConsumerId + recordIndex;
+                        Consumer.consumerUsers.get(currentConsumer).remove(consumerId);
+                        Consumer.consumerObjects.get(currentConsumer).remove(consumerId);
+                        Consumer.consumerObjectArrayList.get(currentConsumer).remove(consumerId);
+                    }
+                    if (registered) {
+                        Consumer.completeRollbackPublications(recordCount);
+                    }
+                }
+            }
+            finally {
+                Consumer.completeReservation(reservation, recordCount);
+            }
+        }
+    }
+
     protected static void queueSignText(String user, Location location, int action, int color, int colorSecondary, boolean frontGlowing, boolean backGlowing, boolean isWaxed, boolean isFront, String line1, String line2, String line3, String line4, String line5, String line6, String line7, String line8, int offset) {
         /*
         if (line1.length() == 0 && line2.length() == 0 && line3.length() == 0 && line4.length() == 0) {
@@ -514,5 +682,9 @@ public class Queue {
 
     protected static void queueWorldInsert(int id, String world) {
         queueStandardData(new Object[] { null, Process.WORLD_INSERT, null, 0, null, 0, id, null }, new String[] { null, null }, world, false, Consumer.reserveConsumer());
+    }
+
+    protected static boolean tryQueueIdentifierInsert(int action, int id, String value) {
+        return queueStandardData(new Object[] { null, action, null, 0, null, 0, id, null }, new String[] { null, null }, value, false, Consumer.reserveConsumer());
     }
 }

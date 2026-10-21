@@ -6,13 +6,14 @@ import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 import net.coreprotect.api.result.UsernameResult;
 import net.coreprotect.config.Config;
 import net.coreprotect.config.ConfigHandler;
 import net.coreprotect.database.Database;
+import net.coreprotect.database.statement.UserStatement;
+import net.coreprotect.utility.DatabaseUtils;
 import net.coreprotect.utility.ErrorReporter;
 
 /**
@@ -49,21 +50,31 @@ public class UsernameAPI {
                 return result;
             }
 
+            Set<String> includedUuids = getUuids(connection, options.getUsers());
+            if (includedUuids != null && includedUuids.isEmpty() && !options.getUsers().isEmpty()) {
+                return result;
+            }
+
+            Set<String> excludedUuids = getUuids(connection, options.getExcludeUsers());
+            if (excludedUuids == null) {
+                return result;
+            }
+            // A NULL in NOT IN would also exclude unrelated users.
+            excludedUuids.remove(null);
+
             int checkTime = 0;
             if (options.getTime() > 0) {
                 checkTime = (int) (System.currentTimeMillis() / 1000L) - options.getTime();
             }
 
-            StringBuilder query = new StringBuilder("SELECT time,uuid,user FROM ");
+            StringBuilder query = new StringBuilder("SELECT time,uuid," + ConfigHandler.databaseType.getUserColumn() + " FROM ");
             query.append(ConfigHandler.prefix).append("username_log WHERE time > ?");
-            if (!uuids.isEmpty()) {
-                query.append(" AND uuid IN (");
-                appendPlaceholders(query, uuids.size());
-                query.append(")");
-            }
-            query.append(" ORDER BY rowid DESC");
+            appendUuidFilter(query, uuids, false);
+            appendUuidFilter(query, includedUuids, false);
+            appendUuidFilter(query, excludedUuids, true);
+            query.append(" ORDER BY ").append(ConfigHandler.getDescendingEventOrder());
             if (options.hasLimit()) {
-                query.append(" LIMIT ").append(options.getLimitOffset()).append(", ").append(options.getLimitCount());
+                query.append(" LIMIT ").append(options.getLimitCount()).append(" OFFSET ").append(options.getLimitOffset());
             }
 
             try (PreparedStatement statement = connection.prepareStatement(query.toString())) {
@@ -72,10 +83,18 @@ public class UsernameAPI {
                 for (String uuid : uuids) {
                     statement.setString(parameterIndex++, uuid);
                 }
+                if (includedUuids != null) {
+                    for (String uuid : includedUuids) {
+                        statement.setString(parameterIndex++, uuid);
+                    }
+                }
+                for (String uuid : excludedUuids) {
+                    statement.setString(parameterIndex++, uuid);
+                }
 
                 try (ResultSet results = statement.executeQuery()) {
                     while (results.next()) {
-                        result.add(parseUsernameResult(results));
+                        result.add(parseUsernameResult(connection, results));
                     }
                 }
             }
@@ -87,13 +106,18 @@ public class UsernameAPI {
         return result;
     }
 
-    private static void appendPlaceholders(StringBuilder query, int count) {
-        for (int index = 0; index < count; index++) {
+    private static void appendUuidFilter(StringBuilder query, Set<String> uuids, boolean excluded) {
+        if (uuids == null || uuids.isEmpty()) {
+            return;
+        }
+        query.append(excluded ? " AND uuid NOT IN (" : " AND uuid IN (");
+        for (int index = 0; index < uuids.size(); index++) {
             if (index > 0) {
                 query.append(",");
             }
             query.append("?");
         }
+        query.append(")");
     }
 
     private static Set<String> getUuids(Connection connection, String user) throws Exception {
@@ -103,13 +127,8 @@ public class UsernameAPI {
             return result;
         }
 
-        String cachedUuid = ConfigHandler.uuidCache.get(user.toLowerCase(Locale.ROOT));
-        if (cachedUuid != null) {
-            result.add(cachedUuid);
-        }
-
-        String collate = Config.getGlobal().MYSQL ? "" : " COLLATE NOCASE";
-        try (PreparedStatement statement = connection.prepareStatement("SELECT uuid FROM " + ConfigHandler.prefix + "user WHERE user = ?" + collate)) {
+        String userMatch = DatabaseUtils.caseInsensitiveEquals(ConfigHandler.databaseType.getUserColumn());
+        try (PreparedStatement statement = connection.prepareStatement("SELECT uuid FROM " + ConfigHandler.prefix + "user WHERE " + userMatch)) {
             statement.setString(1, user);
             try (ResultSet results = statement.executeQuery()) {
                 while (results.next()) {
@@ -118,7 +137,7 @@ public class UsernameAPI {
             }
         }
 
-        try (PreparedStatement statement = connection.prepareStatement("SELECT uuid FROM " + ConfigHandler.prefix + "username_log WHERE user = ?" + collate)) {
+        try (PreparedStatement statement = connection.prepareStatement("SELECT uuid FROM " + ConfigHandler.prefix + "username_log WHERE " + userMatch)) {
             statement.setString(1, user);
             try (ResultSet results = statement.executeQuery()) {
                 while (results.next()) {
@@ -134,14 +153,29 @@ public class UsernameAPI {
         return result.isEmpty() ? null : result;
     }
 
+    private static Set<String> getUuids(Connection connection, List<String> users) throws Exception {
+        Set<String> result = new LinkedHashSet<>();
+        for (String user : users) {
+            Set<String> matches = getUuids(connection, user);
+            if (matches != null) {
+                if (matches.isEmpty()) {
+                    // An empty name or #global matches every user.
+                    return null;
+                }
+                result.addAll(matches);
+            }
+        }
+        return result;
+    }
+
     private static boolean looksLikeUuid(String value) {
         return value.length() == 36 && value.charAt(8) == '-' && value.charAt(13) == '-' && value.charAt(18) == '-' && value.charAt(23) == '-';
     }
 
-    private static UsernameResult parseUsernameResult(ResultSet results) throws Exception {
+    private static UsernameResult parseUsernameResult(Connection connection, ResultSet results) throws Exception {
         String uuid = results.getString("uuid");
         String username = results.getString("user");
-        String player = ConfigHandler.uuidCacheReversed.get(uuid);
+        String player = UserStatement.getNameByUuid(connection, uuid);
         if (player == null) {
             player = username;
         }

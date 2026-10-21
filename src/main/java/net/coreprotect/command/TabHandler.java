@@ -17,6 +17,7 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.bukkit.util.StringUtil;
 
+import net.coreprotect.command.parser.RollbackStateParser;
 import net.coreprotect.config.ConfigHandler;
 
 public class TabHandler implements TabCompleter {
@@ -156,6 +157,7 @@ public class TabHandler implements TabCompleter {
         boolean hasContainer;
         boolean hasCount;
         boolean hasSummary;
+        boolean hasRollbackState;
         boolean hasPreview;
         boolean hasPage;
         boolean validContainer;
@@ -180,6 +182,9 @@ public class TabHandler implements TabCompleter {
             }
             else if (arg.equals("#summary")) {
                 state.hasSummary = true;
+            }
+            else if (RollbackStateParser.isModifier(arg)) {
+                state.hasRollbackState = true;
             }
             else if (arg.equals("#preview")) {
                 state.hasPreview = true;
@@ -442,7 +447,7 @@ public class TabHandler implements TabCompleter {
             return StringUtil.copyPartialMatches(argument1, completions, new ArrayList<>(completions.size()));
         }
         else if (argument0.equals("purge") && sender.hasPermission("coreprotect.purge")) {
-            List<String> completions = new ArrayList<>(Arrays.asList("t:", "r:", "i:"));
+            List<String> completions = new ArrayList<>(Arrays.asList("t:", "r:", "i:", "e:", "a:kill"));
             return StringUtil.copyPartialMatches(argument1, completions, new ArrayList<>(completions.size()));
         }
         else if (hasLookupCommand(argument0, sender)) {
@@ -459,10 +464,10 @@ public class TabHandler implements TabCompleter {
         String argument2 = arg2.toLowerCase(Locale.ROOT);
 
         if (argument1.startsWith("t:")) {
-            List<String> completions = new ArrayList<>(Arrays.asList("r:", "i:"));
+            List<String> completions = new ArrayList<>(Arrays.asList("r:", "i:", "e:", "a:kill"));
             return StringUtil.copyPartialMatches(argument2, completions, new ArrayList<>(completions.size()));
         }
-        else if (argument1.startsWith("r:") || argument1.startsWith("i:")) {
+        else if (argument1.startsWith("r:") || argument1.startsWith("i:") || argument1.startsWith("e:") || argument1.startsWith("a:")) {
             List<String> completions = new ArrayList<>(Arrays.asList("t:"));
             return StringUtil.copyPartialMatches(argument2, completions, new ArrayList<>(completions.size()));
         }
@@ -506,13 +511,14 @@ public class TabHandler implements TabCompleter {
         if (firstParam && state.pageLookup && (lastArgument.equals("l") || lastArgument.equals("lookup"))) {
             params.add("page:");
         }
-        else if (!firstParam && argument.startsWith("#")) {
-            if (!state.hasCount && !state.hasSummary) {
-                params.add("#count");
-                params.add("#sum");
-            }
+        if (argument.startsWith("#")) {
             if (!state.hasCount && !state.hasSummary && (lastArgument.equals("l") || lastArgument.equals("lookup"))) {
+                params.add("#count");
                 params.add("#summary");
+            }
+            if (!state.hasRollbackState && (lastArgument.equals("l") || lastArgument.equals("lookup"))) {
+                params.add("#rolledback");
+                params.add("#restored");
             }
             if (!state.hasPreview) {
                 params.add("#preview");

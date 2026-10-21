@@ -13,20 +13,32 @@ public class WorldUtils extends Queue {
     }
 
     public static int getWorldId(String name) {
+        if (ConfigHandler.databaseType.isClickHouse()) {
+            return ConfigHandler.resolveIdentifierId(ConfigHandler.CacheType.WORLDS, name, true);
+        }
         int id = -1;
         try {
             if (ConfigHandler.worlds.get(name) == null) {
-                // Check if another server has already added this world (multi-server setup)
-                id = ConfigHandler.reloadAndGetId(ConfigHandler.CacheType.WORLDS, name);
-                if (id != -1) {
-                    return id;
-                }
+                int wid = -1;
+                // Same monitor as reloadAndGetId, so two threads cannot allocate the same id
+                synchronized (ConfigHandler.class) {
+                    if (ConfigHandler.worlds.get(name) == null) {
+                        // Check if another server has already added this world (multi-server setup)
+                        id = ConfigHandler.reloadAndGetId(ConfigHandler.CacheType.WORLDS, name);
+                        if (id != -1) {
+                            return id;
+                        }
 
-                int wid = ConfigHandler.worldId + 1;
-                ConfigHandler.worlds.put(name, wid);
-                ConfigHandler.worldsReversed.put(wid, name);
-                ConfigHandler.worldId = wid;
-                Queue.queueWorldInsert(wid, name);
+                        wid = ConfigHandler.worldId + 1;
+                        ConfigHandler.worlds.put(name, wid);
+                        ConfigHandler.worldsReversed.put(wid, name);
+                        ConfigHandler.worldId = wid;
+                    }
+                }
+                // Queued outside the monitor so it is never held while the queue lock is taken
+                if (wid != -1) {
+                    Queue.queueWorldInsert(wid, name);
+                }
             }
             id = ConfigHandler.worlds.get(name);
         }
@@ -37,10 +49,15 @@ public class WorldUtils extends Queue {
     }
 
     public static String getWorldName(int id) {
+        if (ConfigHandler.databaseType.isClickHouse()) {
+            String name = ConfigHandler.getIdentifierValue(ConfigHandler.CacheType.WORLDS, id);
+            return name == null ? "" : name;
+        }
         String name = "";
         try {
-            if (ConfigHandler.worldsReversed.get(id) != null) {
-                name = ConfigHandler.worldsReversed.get(id);
+            String cachedName = ConfigHandler.worldsReversed.get(id);
+            if (cachedName != null) {
+                name = cachedName;
             }
         }
         catch (Exception e) {
@@ -93,11 +110,10 @@ public class WorldUtils extends Queue {
 
     public static String getWidIndex(String queryTable) {
         String index = "";
-        boolean isMySQL = net.coreprotect.config.Config.getGlobal().MYSQL;
-        if (isMySQL) {
+        if (ConfigHandler.databaseType.isMySQL()) {
             index = "USE INDEX(wid) ";
         }
-        else {
+        else if (ConfigHandler.databaseType.isSQLite()) {
             switch (queryTable) {
                 case "block":
                     index = "INDEXED BY block_index ";

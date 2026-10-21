@@ -18,9 +18,11 @@ import org.bukkit.entity.Player;
 
 import net.coreprotect.command.lookup.BlockLookupThread;
 import net.coreprotect.command.lookup.ChestTransactionLookupThread;
+import net.coreprotect.command.lookup.EntityInteractionLookupThread;
 import net.coreprotect.command.lookup.StandardLookupThread;
 import net.coreprotect.command.parser.ActionParser;
 import net.coreprotect.command.parser.MessageFilterParser;
+import net.coreprotect.command.parser.RollbackStateParser;
 import net.coreprotect.config.Config;
 import net.coreprotect.config.ConfigHandler;
 import net.coreprotect.language.Phrase;
@@ -28,6 +30,7 @@ import net.coreprotect.language.Selector;
 import net.coreprotect.model.action.EntityActionFilter;
 import net.coreprotect.model.action.LookupActions;
 import net.coreprotect.model.lookup.LookupOutputMode;
+import net.coreprotect.model.lookup.LookupRollbackState;
 import net.coreprotect.utility.Chat;
 import net.coreprotect.utility.ChatMessage;
 import net.coreprotect.utility.Color;
@@ -59,12 +62,20 @@ public class LookupCommand {
         int argWid = CommandParser.parseWorld(args, true, true);
         int parseRows = CommandParser.parseRows(args);
         boolean summary = CommandParser.parseSummary(args);
-        LookupOutputMode outputMode = summary ? LookupOutputMode.SUMMARY : LookupOutputMode.DETAIL;
+        LookupOutputMode outputMode = summary ? LookupOutputMode.SUMMARY
+                : CommandParser.parseCount(args) ? LookupOutputMode.COUNT : LookupOutputMode.DETAIL;
+        RollbackStateParser.ParseResult rollbackStateResult = CommandParser.parseRollbackState(args);
+        LookupRollbackState rollbackState = rollbackStateResult.getState();
         boolean worldedit = CommandParser.parseWorldEdit(args);
         boolean forceglobal = CommandParser.parseForceGlobal(args);
         boolean pageLookup = false;
 
         if (argBlocks == null || argExclude == null || argExcludeUsers == null) {
+            return;
+        }
+
+        if (rollbackStateResult.isConflicting()) {
+            Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.INVALID_PARAMETER, "#rolledback + #restored"));
             return;
         }
 
@@ -89,7 +100,7 @@ public class LookupCommand {
                     argAction.add(LookupActions.ENTITY_KILL);
                     argAction.add(LookupActions.ENTITY_SPAWN);
                 }
-                else if (!argEntityActionFilter.includesAnyEntity(argAction, true)) {
+                else if (!argEntityActionFilter.includesAnyEntity(argAction, true) && !argAction.contains(LookupActions.INTERACTION)) {
                     Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.INVALID_INCLUDE_COMBO));
                     return;
                 }
@@ -107,7 +118,7 @@ public class LookupCommand {
                     argAction.add(LookupActions.ENTITY_KILL);
                     argAction.add(LookupActions.ENTITY_SPAWN);
                 }
-                else if (!argEntityActionFilter.includesAnyEntity(argAction, true)) {
+                else if (!argEntityActionFilter.includesAnyEntity(argAction, true) && !argAction.contains(LookupActions.INTERACTION)) {
                     Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.INVALID_INCLUDE_COMBO));
                     return;
                 }
@@ -184,12 +195,18 @@ public class LookupCommand {
             Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.INVALID_ACTION));
             return;
         }
+        if (rollbackState != LookupRollbackState.ANY && (argAction.contains(LookupActions.CHAT) || argAction.contains(LookupActions.COMMAND) || argAction.contains(LookupActions.SESSION) || argAction.contains(LookupActions.USERNAME) || argAction.contains(LookupActions.SIGN))) {
+            Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.INCOMPATIBLE_ACTION, rollbackState == LookupRollbackState.ROLLED_BACK ? "#rolledback" : "#restored"));
+            return;
+        }
         if (messageFilterResult.isSpecified()) {
             if (messageFilterResult.hasInvalidLength()) {
                 Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.MESSAGE_FILTER_TOO_SHORT, Integer.toString(MessageFilterParser.MINIMUM_FILTER_CODE_POINTS)));
                 return;
             }
-            if (argAction.isEmpty() || argAction.stream().anyMatch(action -> action != LookupActions.CHAT && action != LookupActions.COMMAND)) {
+            boolean messageLookup = !argAction.isEmpty() && argAction.stream().allMatch(action -> action == LookupActions.CHAT || action == LookupActions.COMMAND);
+            boolean signLookup = !argAction.isEmpty() && argAction.stream().allMatch(action -> action == LookupActions.SIGN);
+            if (!messageLookup && !signLookup) {
                 Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.INCOMPATIBLE_ACTION, "f:<filter>"));
                 return;
             }
@@ -278,7 +295,7 @@ public class LookupCommand {
             }
         }
 
-        if (startTime <= 0 && !pageLookup && type == 4 && (argBlocks.size() > 0 || argUsers.size() > 0)) {
+        if (startTime <= 0 && argRadius == null && !pageLookup && type == 4 && (argBlocks.size() > 0 || argUsers.size() > 0)) {
             Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.MISSING_LOOKUP_TIME, Selector.FIRST));
             return;
         }
@@ -365,7 +382,7 @@ public class LookupCommand {
             Thread thread = new Thread(runnable);
             thread.start();
         }
-        else if (type == 2 || type == 3 || type == 7 || type == 8) {
+        else if (type == 2 || type == 3 || type == 7 || type == 8 || type == 9) {
             boolean defaultRe = true;
             int page = 1;
             int re = 7;
@@ -407,6 +424,13 @@ public class LookupCommand {
             }
 
             // String bc = x+"."+y+"."+z+"."+wid+"."+rstring+"."+lookup_user;
+            if (type == 9) {
+                Runnable runnable = new EntityInteractionLookupThread(player, command, page, re);
+                Thread thread = new Thread(runnable);
+                thread.start();
+                return;
+            }
+
             String lcommand = ConfigHandler.lookupCommand.get(player.getName());
             String[] data = lcommand.split("\\.");
             int x = Integer.parseInt(data[0]);
@@ -419,13 +443,17 @@ public class LookupCommand {
             }
 
             String bc = x + "." + y + "." + z + "." + wid + "." + lookupType + "." + re;
+            Integer entitySpawnRowId = type == 2 && data.length > 6 ? Integer.valueOf(data[6]) : null;
+            if (entitySpawnRowId != null) {
+                bc += "." + entitySpawnRowId;
+            }
             ConfigHandler.lookupCommand.put(player.getName(), bc);
 
             String world = WorldUtils.getWorldName(wid);
             final Block block = Bukkit.getServer().getWorld(world).getBlockAt(x, y, z);
             final BlockState blockState = block.getState();
 
-            Runnable runnable = new BlockLookupThread(player, command, block, blockState, page, re, type);
+            Runnable runnable = new BlockLookupThread(player, command, block, blockState, page, re, type, entitySpawnRowId);
             Thread thread = new Thread(runnable);
             thread.start();
         }
@@ -551,6 +579,7 @@ public class LookupCommand {
                     argRadius = ConfigHandler.lookupRadius.get(player.getName());
                     ts = ConfigHandler.lookupTime.get(player.getName());
                     outputMode = ConfigHandler.lookupOutputMode.getOrDefault(player.getName(), LookupOutputMode.DETAIL);
+                    rollbackState = ConfigHandler.lookupRollbackState.getOrDefault(player.getName(), LookupRollbackState.ANY);
                     startTime = 1;
                     endTime = 0;
                 }
@@ -625,14 +654,9 @@ public class LookupCommand {
                         }
                     }
 
-                    if (outputMode == LookupOutputMode.SUMMARY && !isValidSummaryScope(timeStart, rollbackusers, argBlocks, argRadius)) {
-                        Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.MISSING_PARAMETERS, "/co l t:<time> u:<user>|i:<block>|r:<radius> #summary"));
-                        return;
-                    }
-
                     Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Color.ITALIC + Phrase.build(Phrase.LOOKUP_SEARCHING));
 
-                    Runnable runnable = new StandardLookupThread(player, command, rollbackusers, argBlocks, argExclude, argExcludeUsers, argAction, argEntityActionFilter, argFilters, argRadius, lo, x, y, z, wid, argWid, timeStart, timeEnd, argNoisy, argExcluded, argRestricted, pa, re, type, ts, outputMode);
+                    Runnable runnable = new StandardLookupThread(player, command, rollbackusers, argBlocks, argExclude, argExcludeUsers, argAction, argEntityActionFilter, argFilters, argRadius, lo, x, y, z, wid, argWid, timeStart, timeEnd, argNoisy, argExcluded, argRestricted, pa, re, type, ts, outputMode, rollbackState);
                     Thread thread = new Thread(runnable);
                     thread.start();
                 }
@@ -660,13 +684,4 @@ public class LookupCommand {
         }
     }
 
-    private static boolean isValidSummaryScope(long timeStart, List<String> users, List<Object> includedTypes, Integer[] radius) {
-        if (timeStart <= 0) {
-            return false;
-        }
-        if (radius != null || !includedTypes.isEmpty() || users.contains("#container")) {
-            return true;
-        }
-        return users.stream().anyMatch(user -> !user.startsWith("#"));
-    }
 }

@@ -1,8 +1,8 @@
 package net.coreprotect.database.logger;
 
-import java.sql.PreparedStatement;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -13,6 +13,8 @@ import net.coreprotect.CoreProtect;
 import net.coreprotect.bukkit.BukkitAdapter;
 import net.coreprotect.config.Config;
 import net.coreprotect.config.ConfigHandler;
+import net.coreprotect.database.Database;
+import net.coreprotect.database.ConsumerWriteBatch;
 import net.coreprotect.database.statement.BlockStatement;
 import net.coreprotect.database.statement.UserStatement;
 import net.coreprotect.event.CoreProtectPreLogEvent;
@@ -21,7 +23,6 @@ import net.coreprotect.thread.CacheHandler;
 import net.coreprotect.utility.BlockTypeUtils;
 import net.coreprotect.utility.MaterialUtils;
 import net.coreprotect.utility.WorldUtils;
-import net.coreprotect.utility.ErrorReporter;
 
 public class BlockPlaceLogger {
 
@@ -29,7 +30,7 @@ public class BlockPlaceLogger {
         throw new IllegalStateException("Database class");
     }
 
-    public static void log(PreparedStatement preparedStmt, int batchCount, String user, BlockState block, int replacedType, int replacedData, Material forceType, int forceData, boolean force, List<Object> meta, String blockData, String replaceBlockData) {
+    public static void log(ConsumerWriteBatch preparedStmt, int batchCount, String user, BlockState block, int replacedType, int replacedData, Material forceType, int forceData, boolean force, List<Object> meta, String blockData, String replaceBlockData) {
         try {
             Material type = block.getType();
             if (blockData == null && (forceType == null || (!forceType.equals(Material.WATER)) && (!forceType.equals(Material.LAVA)))) {
@@ -82,23 +83,24 @@ public class BlockPlaceLogger {
             int y = block.getY();
             int z = block.getZ();
             long chunkKey = (x >> 4) & 0xffffffffL | ((z >> 4) & 0xffffffffL) << 32;
-            if (ConfigHandler.populatedChunks.get(chunkKey) != null) {
+            Map<Long, Long> populatedChunks = ConfigHandler.populatedChunks.get(block.getWorld().getUID());
+            if (populatedChunks != null && populatedChunks.get(chunkKey) != null) {
                 boolean isWater = user.equals("#water");
                 boolean isLava = user.equals("#lava");
                 boolean isVine = user.equals("#vine");
                 if (isWater || isLava || isVine) {
                     int timeDelay = isWater ? 60 : 240;
-                    long timeSincePopulation = ((System.currentTimeMillis() / 1000L) - ConfigHandler.populatedChunks.getOrDefault(chunkKey, 0L));
+                    long timeSincePopulation = ((System.currentTimeMillis() / 1000L) - populatedChunks.getOrDefault(chunkKey, 0L));
                     if (timeSincePopulation <= timeDelay) {
                         return;
                     }
 
                     if (timeSincePopulation > 240) {
-                        ConfigHandler.populatedChunks.remove(chunkKey);
+                        populatedChunks.remove(chunkKey);
                     }
                 }
                 else if (type == Material.WATER || type == Material.LAVA) {
-                    ConfigHandler.populatedChunks.remove(chunkKey);
+                    populatedChunks.remove(chunkKey);
                 }
             }
 
@@ -134,7 +136,7 @@ public class BlockPlaceLogger {
             BlockStatement.insert(preparedStmt, batchCount, time, userId, wid, x, y, z, internalType, data, meta, blockData, LookupActions.BLOCK_PLACE, 0);
         }
         catch (Exception e) {
-            ErrorReporter.report(e);
+            Database.handleWriteFailure(e);
         }
     }
 

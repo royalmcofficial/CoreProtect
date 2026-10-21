@@ -120,6 +120,31 @@ public class ItemUtils {
         return result;
     }
 
+    public static ItemStack[] getSharedContainerState(ItemStack[] array, ItemStack[] previousState) {
+        if (array == null) {
+            return null;
+        }
+        if (previousState == null || previousState.length != array.length) {
+            return getContainerState(array);
+        }
+
+        ItemStack[] result = new ItemStack[array.length];
+        boolean unchanged = true;
+        for (int i = 0; i < array.length; i++) {
+            ItemStack itemStack = array[i];
+            ItemStack previousItem = previousState[i];
+            if (itemStack == null ? previousItem == null : itemStack.equals(previousItem)) {
+                result[i] = previousItem;
+            }
+            else {
+                result[i] = itemStack == null ? null : itemStack.clone();
+                unchanged = false;
+            }
+        }
+
+        return unchanged ? previousState : result;
+    }
+
     public static ItemStack[] sortContainerState(ItemStack[] array) {
         if (array == null) {
             return null;
@@ -666,7 +691,8 @@ public class ItemUtils {
         var item = getItemStack(metadata, type, amount);
         if (item == null) return "";
 
-        String displayName = item.hasItemMeta() && item.getItemMeta().hasDisplayName() ? item.getItemMeta().getDisplayName() : "";
+        ItemMeta itemMeta = item.hasItemMeta() ? item.getItemMeta() : null;
+        String displayName = itemMeta == null ? "" : getItemDisplayName(itemMeta);
         StringBuilder message = new StringBuilder(Color.ITALIC + displayName + Color.GREY);
 
         List<String> enchantments = ItemMetaHandler.getEnchantments(item, displayName);
@@ -686,6 +712,14 @@ public class ItemUtils {
         }
 
         return message.toString();
+    }
+
+    private static String getItemDisplayName(ItemMeta itemMeta) {
+        if (itemMeta.hasDisplayName()) {
+            return itemMeta.getDisplayName();
+        }
+
+        return BukkitAdapter.ADAPTER.getItemName(itemMeta);
     }
 
     public static Map<Integer, Object> serializeItemStackLegacy(ItemStack itemStack, String faceData, int slot) {

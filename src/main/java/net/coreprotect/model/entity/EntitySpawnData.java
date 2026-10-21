@@ -7,6 +7,8 @@ import org.bukkit.entity.EntityType;
 
 public final class EntitySpawnData {
 
+    private static final int MAX_PERSISTENCE_ATTEMPTS = 3;
+
     public enum Operation {
         VERIFY,
         LOCATION,
@@ -33,8 +35,19 @@ public final class EntitySpawnData {
     private final long verificationEpoch;
     private final int killRowId;
     private final long pairedBlockRowId;
+    private final int persistenceAttempts;
+    private final EntityInteractionOrigin removalOrigin;
+    private final int removalTime;
 
     private EntitySpawnData(Operation operation, UUID uuid, UUID previousUuid, EntityType entityType, Location location, long blockRowId, int trackingRowId, byte[] state, int rolledBack, long verificationEpoch, int killRowId, long pairedBlockRowId) {
+        this(operation, uuid, previousUuid, entityType, location, blockRowId, trackingRowId, state, rolledBack, verificationEpoch, killRowId, pairedBlockRowId, 0);
+    }
+
+    private EntitySpawnData(Operation operation, UUID uuid, UUID previousUuid, EntityType entityType, Location location, long blockRowId, int trackingRowId, byte[] state, int rolledBack, long verificationEpoch, int killRowId, long pairedBlockRowId, int persistenceAttempts) {
+        this(operation, uuid, previousUuid, entityType, location, blockRowId, trackingRowId, state, rolledBack, verificationEpoch, killRowId, pairedBlockRowId, persistenceAttempts, null, 0);
+    }
+
+    private EntitySpawnData(Operation operation, UUID uuid, UUID previousUuid, EntityType entityType, Location location, long blockRowId, int trackingRowId, byte[] state, int rolledBack, long verificationEpoch, int killRowId, long pairedBlockRowId, int persistenceAttempts, EntityInteractionOrigin removalOrigin, int removalTime) {
         this.operation = operation;
         this.uuid = uuid;
         this.previousUuid = previousUuid;
@@ -47,6 +60,9 @@ public final class EntitySpawnData {
         this.verificationEpoch = verificationEpoch;
         this.killRowId = killRowId;
         this.pairedBlockRowId = pairedBlockRowId;
+        this.persistenceAttempts = persistenceAttempts;
+        this.removalOrigin = removalOrigin;
+        this.removalTime = removalTime;
     }
 
     public static EntitySpawnData log(UUID uuid, EntityType entityType, Location location) {
@@ -63,6 +79,13 @@ public final class EntitySpawnData {
 
     public static EntitySpawnData removed(UUID uuid, Location location) {
         return new EntitySpawnData(Operation.REMOVED, uuid, null, null, location, 0, 0, null, 0, -1L, 0, 0);
+    }
+
+    public static EntitySpawnData removed(UUID uuid, EntityInteractionOrigin origin, Location location, int time) {
+        if (uuid == null || origin == null || location == null || location.getWorld() == null) {
+            throw new IllegalArgumentException("Invalid entity removal snapshot");
+        }
+        return new EntitySpawnData(Operation.REMOVED, uuid, null, null, location, 0, 0, null, 0, -1L, 0, 0, 0, origin, time);
     }
 
     public static EntitySpawnData revived(UUID previousUuid, UUID uuid, Location location) {
@@ -143,5 +166,20 @@ public final class EntitySpawnData {
 
     public long getPairedBlockRowId() {
         return pairedBlockRowId;
+    }
+
+    public EntityInteractionOrigin getRemovalOrigin() {
+        return removalOrigin;
+    }
+
+    public int getRemovalTime() {
+        return removalTime;
+    }
+
+    public EntitySpawnData retryLog() {
+        if (operation != null || persistenceAttempts >= MAX_PERSISTENCE_ATTEMPTS) {
+            return null;
+        }
+        return new EntitySpawnData(null, uuid, null, entityType, location, 0, 0, null, 0, -1L, 0, 0, persistenceAttempts + 1);
     }
 }

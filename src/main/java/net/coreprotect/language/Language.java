@@ -54,11 +54,18 @@ public class Language {
         phrases.put(Phrase.CONTAINER_HEADER, "Container Transactions");
         phrases.put(Phrase.CPU_CORES, "CPU cores.");
         phrases.put(Phrase.DATABASE_BUSY, "Database busy. Please try again later.");
+        phrases.put(Phrase.DATABASE_FALLBACK, "Unable to load {0}. Using {1}; config.yml updated.");
         phrases.put(Phrase.DATABASE_INDEX_ERROR, "Unable to validate database indexes.");
         phrases.put(Phrase.DATABASE_LOCKED_1, "Database locked. Waiting up to 15 seconds...");
         phrases.put(Phrase.DATABASE_LOCKED_2, "Database is already in use. Please try again.");
         phrases.put(Phrase.DATABASE_LOCKED_3, "To disable database locking, set \"database-lock: false\".");
         phrases.put(Phrase.DATABASE_LOCKED_4, "Disabling database locking can result in data corruption.");
+        phrases.put(Phrase.DATABASE_PERSISTENCE_HALTED, "Database writes halted. Please restart the server.");
+        phrases.put(Phrase.DATABASE_QUEUE_LOSS, "Queued data will be lost when the server stops.");
+        phrases.put(Phrase.DATABASE_RECOVERY_FAILED, "Database recovery failed after {0} attempts.");
+        phrases.put(Phrase.DATABASE_RECOVERY_STARTED, "Database became unavailable. Attempting database recovery.");
+        phrases.put(Phrase.DATABASE_RECOVERY_SUCCESS, "Database recovery completed. Queued writes will resume.");
+        phrases.put(Phrase.DATABASE_TYPE_OVERRIDE, "Option \"database-type\" overrides \"use-mysql\".");
         phrases.put(Phrase.DATABASE_UNREACHABLE, "Database is unreachable. Discarding data and shutting down.");
         phrases.put(Phrase.DEVELOPMENT_BRANCH, "Development branch detected, skipping patch scripts.");
         phrases.put(Phrase.DIRT_BLOCK, "Placed a temporary safety block under you.");
@@ -77,8 +84,8 @@ public class Language {
         phrases.put(Phrase.HELP_COMMAND, "Display more info for that command.");
         phrases.put(Phrase.HELP_EXCLUDE_1, "Exclude blocks/users.");
         phrases.put(Phrase.HELP_EXCLUDE_2, "Examples: [e:stone], [e:Notch], [e:stone,Notch]");
-        phrases.put(Phrase.HELP_FILTER_1, "Filter chat/command messages.");
-        phrases.put(Phrase.HELP_FILTER_2, "Example: [a:command f:/co]");
+        phrases.put(Phrase.HELP_FILTER_1, "Filter chat, command, or sign text.");
+        phrases.put(Phrase.HELP_FILTER_2, "Examples: [a:command f:/co], [a:sign f:-Shop]");
         phrases.put(Phrase.HELP_HEADER, "{0} Help");
         phrases.put(Phrase.HELP_INCLUDE_1, "Include specific blocks/entities.");
         phrases.put(Phrase.HELP_INCLUDE_2, "Examples: [i:stone], [i:zombie], [i:stone,wood,bedrock]");
@@ -106,8 +113,10 @@ public class Language {
         phrases.put(Phrase.HELP_PURGE_1, "Delete data older than specified time.");
         phrases.put(Phrase.HELP_PURGE_2, "For example, \"{0}\" will delete all data older than one month, and only keep the last 30 days of data.");
         phrases.put(Phrase.HELP_PURGE_3, "Specify the amount of time to purge.");
-        phrases.put(Phrase.HELP_PURGE_4, "Specify a world to limit the purge to.");
-        phrases.put(Phrase.HELP_PURGE_5, "Include specific blocks in the purge.");
+        phrases.put(Phrase.HELP_PURGE_4, "Specify a world or radius to limit the purge to.");
+        phrases.put(Phrase.HELP_PURGE_5, "Include specific blocks or entity kills in the purge.");
+        phrases.put(Phrase.HELP_PURGE_6, "Keep entity kills of these types.");
+        phrases.put(Phrase.HELP_PURGE_7, "Only purge entity kills.");
         phrases.put(Phrase.HELP_PURGE_COMMAND, "Delete old block data.");
         phrases.put(Phrase.HELP_RADIUS_1, "Specify a radius area.");
         phrases.put(Phrase.HELP_RADIUS_2, "Examples: [r:10] (Only make changes within 10 blocks of you)");
@@ -154,6 +163,8 @@ public class Language {
         phrases.put(Phrase.LOOKUP_CONTAINER, "{0} {added|removed} {1} {2}.");
         phrases.put(Phrase.LOOKUP_HEADER, "{0} Lookup Results");
         phrases.put(Phrase.LOOKUP_INTERACTION, "{0} {clicked|killed} {1}.");
+        phrases.put(Phrase.LOOKUP_ENTITY_INTERACTION, "{0} {clicked|sheared|leashed|unleashed} {1}.");
+        phrases.put(Phrase.LOOKUP_ENTITY_INTERACTION_ORIGIN, "Origin location");
         phrases.put(Phrase.LOOKUP_ENTITY_ORIGIN, "Spawn location");
         phrases.put(Phrase.LOOKUP_ENTITY_SPAWN, "{0} spawned {1}.");
         phrases.put(Phrase.LOOKUP_ITEM, "{0} {picked up|dropped} {1} {2}.");
@@ -165,8 +176,9 @@ public class Language {
         phrases.put(Phrase.LOOKUP_STORAGE, "{0} {deposited|withdrew} {1} {2}.");
         phrases.put(Phrase.LOOKUP_TIME, "{0} ago");
         phrases.put(Phrase.LOOKUP_USERNAME, "{0} logged in as {1}.");
+        phrases.put(Phrase.MAXIMUM_PURGE_RADIUS, "The maximum purge radius is {0}.");
         phrases.put(Phrase.MAXIMUM_RADIUS, "The maximum {lookup|rollback|restore} radius is {0}.");
-        phrases.put(Phrase.MESSAGE_FILTER_TOO_SHORT, "Each message filter must be at least {0} characters.");
+        phrases.put(Phrase.MESSAGE_FILTER_TOO_SHORT, "Minimum message filter length is {0} characters.");
         phrases.put(Phrase.MISSING_ACTION_USER, "To use that action, please specify a user.");
         phrases.put(Phrase.MISSING_LOOKUP_TIME, "Please specify the amount of time to {lookup|rollback|restore}.");
         phrases.put(Phrase.MISSING_LOOKUP_USER, "Please specify a user or {block|radius} to lookup.");
@@ -213,6 +225,7 @@ public class Language {
         phrases.put(Phrase.PURGE_SUCCESS, "Data purge successful.");
         phrases.put(Phrase.RAM_STATS, "{0}GB / {1}GB RAM");
         phrases.put(Phrase.RELOAD_STARTED, "Reloading configuration - please wait.");
+        phrases.put(Phrase.RELOAD_FAILED, "Database reload failed. Please try again.");
         phrases.put(Phrase.RELOAD_SUCCESS, "Configuration successfully reloaded.");
         phrases.put(Phrase.ROLLBACK_ABORTED, "Rollback or restore aborted.");
         phrases.put(Phrase.ROLLBACK_CHUNKS_FOUND, "Found {0} {chunk|chunks} to modify.");
@@ -232,6 +245,7 @@ public class Language {
         phrases.put(Phrase.STATUS_AUTO_PURGE, "Cleanup: {0} {row|rows} auto purged since restart.");
         phrases.put(Phrase.STATUS_CONSUMER, "Consumer: {0} {item|items} in queue.");
         phrases.put(Phrase.STATUS_DATABASE, "Database: Using {0}.");
+        phrases.put(Phrase.STATUS_DATABASE_STATE, "({writes halted|unreachable})");
         phrases.put(Phrase.STATUS_INTEGRATION, "{0}: Integration {enabled|disabled}.");
         phrases.put(Phrase.STATUS_LICENSE, "License: {0}");
         phrases.put(Phrase.STATUS_SYSTEM, "System: {0}");
@@ -253,6 +267,7 @@ public class Language {
         phrases.put(Phrase.UPGRADE_IN_PROGRESS, "Upgrade in progress. Please try again later.");
         phrases.put(Phrase.USER_NOT_FOUND, "User \"{0}\" not found.");
         phrases.put(Phrase.USER_OFFLINE, "The user \"{0}\" is not online.");
+        phrases.put(Phrase.USING_DATABASE, "Using {0} for data storage.");
         phrases.put(Phrase.USING_MYSQL, "Using MySQL for data storage.");
         phrases.put(Phrase.USING_SQLITE, "Using SQLite for data storage.");
         phrases.put(Phrase.VALID_DONATION_KEY, "Valid donation key.");

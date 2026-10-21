@@ -9,6 +9,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Lightable;
+import org.bukkit.block.data.Waterlogged;
 import org.bukkit.block.data.type.Dispenser;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -16,15 +17,19 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.util.Vector;
 
+import net.coreprotect.CoreProtect;
 import net.coreprotect.bukkit.BukkitAdapter;
 import net.coreprotect.config.Config;
 import net.coreprotect.consumer.Queue;
 import net.coreprotect.listener.player.InventoryChangeListener;
 import net.coreprotect.model.BlockGroup;
+import net.coreprotect.paper.PaperAdapter;
 import net.coreprotect.paper.listener.BlockPreDispenseListener;
 import net.coreprotect.thread.CacheHandler;
+import net.coreprotect.thread.Scheduler;
+import net.coreprotect.utility.BlockUtils;
+import net.coreprotect.utility.ErrorReporter;
 
 public final class BlockDispenseListener extends Queue implements Listener {
 
@@ -49,7 +54,6 @@ public final class BlockDispenseListener extends Queue implements Listener {
                 Block newBlock = block.getRelative(dispenser.getFacing());
                 BlockData newBlockData = newBlock.getBlockData();
                 Location velocityLocation = event.getVelocity().toLocation(world);
-                boolean dispenseSuccess = !event.getVelocity().equals(new Vector()); // true if velocity is set
                 boolean dispenseRelative = newBlock.getLocation().equals(velocityLocation); // true if velocity location matches relative location
 
                 if (!BlockPreDispenseListener.useBlockPreDispenseEvent || (!BlockPreDispenseListener.useForDroppers && block.getType() == Material.DROPPER)) {
@@ -61,7 +65,7 @@ public final class BlockDispenseListener extends Queue implements Listener {
                         forceItem = true; // droppers always drop items
                     }
 
-                    BlockState dispenserState = block.getState();
+                    BlockState dispenserState = PaperAdapter.ADAPTER.getBlockState(block, false);
                     ItemStack[] inventory = ((InventoryHolder) dispenserState).getInventory().getStorageContents();
                     if (forceItem) {
                         inventory = Arrays.copyOf(inventory, inventory.length + 1);
@@ -84,11 +88,19 @@ public final class BlockDispenseListener extends Queue implements Listener {
                     type = BukkitAdapter.ADAPTER.getBucketContents(material);
                 }
 
-                if (!dispenseSuccess && material == Material.BONE_MEAL) {
+                // Bone meal is applied to the block a dispenser faces, so remember that block for
+                // BlockFertilizeListener to attribute the growth to the dispenser. Droppers eject
+                // the item as an entity instead, so they must not claim the block.
+                if (material == Material.BONE_MEAL && block.getType() == Material.DISPENSER) {
                     String key = CacheHandler.locationKey(newBlock.getLocation());
                     if (!key.isEmpty()) {
                         CacheHandler.redstoneCache.put(key, new Object[] { System.currentTimeMillis(), user });
                     }
+                }
+
+                // The item transaction and bone meal hand-off above are unaffected by this option.
+                if (!config.DISPENSERS) {
+                    return;
                 }
 
                 if (type == Material.FIRE && (!config.BLOCK_IGNITE || !(newBlockData instanceof Lightable))) {
@@ -98,31 +110,59 @@ public final class BlockDispenseListener extends Queue implements Listener {
                     return;
                 }
 
-                if (!type.equals(Material.AIR) || !newBlock.getType().equals(Material.AIR)) {
-                    if (type == Material.FIRE) { // lit a lightable block
-                        type = newBlock.getType();
-                        if (BlockGroup.LIGHTABLES.contains(type)) {
-                            Lightable lightable = (Lightable) newBlockData;
-                            lightable.setLit(true);
+                if (type == Material.FIRE) { // lit a lightable block
+                    type = newBlock.getType();
+                    if (BlockGroup.LIGHTABLES.contains(type)) {
+                        Lightable lightable = (Lightable) newBlockData;
+                        lightable.setLit(true);
 
-                            queueBlockPlace(user, newBlock.getState(), newBlock.getType(), newBlock.getState(), type, -1, 0, newBlockData.getAsString());
-                        }
+                        queueBlockPlace(user, newBlock.getState(), newBlock.getType(), newBlock.getState(), type, -1, 0, newBlockData.getAsString());
                     }
-                    else if (dispenseRelative) {
-                        BlockState blockState = newBlock.getState();
-                        if (config.DUPLICATE_SUPPRESSION && shouldSuppressDispenseLiquidDuplicate(user, newBlock, type)) {
-                            return;
-                        }
-                        if (!type.equals(Material.AIR)) {
-                            queueBlockPlaceValidate(user, blockState, newBlock, blockState, type, 1, 1, null, 0);
-                        }
-                        else {
-                            Queue.queueBlockBreak(user, newBlock.getState(), newBlock.getType(), newBlock.getBlockData().getAsString(), 0);
-                        }
+                }
+                else if (dispenseRelative && !type.equals(Material.AIR)) {
+                    BlockState blockState = newBlock.getState();
+                    if (config.DUPLICATE_SUPPRESSION && shouldSuppressDispenseLiquidDuplicate(user, newBlock, type)) {
+                        return;
                     }
+                    queueBlockPlaceValidate(user, blockState, newBlock, blockState, type, 1, 1, null, 0);
+                }
+                else if (dispenseRelative && material == Material.BUCKET) {
+                    BlockState blockState = newBlock.getState();
+                    if (config.DUPLICATE_SUPPRESSION && shouldSuppressDispenseLiquidDuplicate(user, newBlock, type)) {
+                        return;
+                    }
+                    queueBucketRemovalValidate(user, newBlock, blockState);
                 }
             }
         }
+    }
+
+    private static void queueBucketRemovalValidate(String user, Block block, BlockState blockState) {
+        Material originalType = blockState.getType();
+        BlockData originalBlockData = blockState.getBlockData();
+        String blockData = originalBlockData.getAsString();
+        boolean waterlogged = originalBlockData instanceof Waterlogged && ((Waterlogged) originalBlockData).isWaterlogged();
+
+        Scheduler.scheduleSyncDelayedTask(CoreProtect.getInstance(), () -> {
+            try {
+                Material currentType = block.getType();
+                Material removedType = originalType;
+                boolean removed = !BlockUtils.isAir(originalType) && BlockUtils.isAir(currentType);
+
+                if (waterlogged) {
+                    BlockData currentBlockData = block.getBlockData();
+                    removed = BlockUtils.isAir(currentType) || (currentType == originalType && currentBlockData instanceof Waterlogged && !((Waterlogged) currentBlockData).isWaterlogged());
+                    removedType = Material.WATER;
+                }
+
+                if (removed) {
+                    Queue.queueBlockBreak(user, blockState, removedType, blockData, 0);
+                }
+            }
+            catch (Exception e) {
+                ErrorReporter.report(e);
+            }
+        }, block.getLocation(), 0);
     }
 
     private boolean shouldSuppressDispenseLiquidDuplicate(String user, Block targetBlock, Material newType) {

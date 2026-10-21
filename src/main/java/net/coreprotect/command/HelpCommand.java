@@ -70,8 +70,10 @@ public class HelpCommand {
                 else if (helpcommand.equals("purge") || helpcommand.equals("purges")) {
                     Chat.sendMessage(player, Color.DARK_AQUA + "/co purge " + Color.GREY + "<params> " + Color.WHITE + "- " + Phrase.build(Phrase.HELP_PURGE_1));
                     Chat.sendMessage(player, Color.DARK_AQUA + "| " + Color.GREY + "t:<time> " + Color.WHITE + "- " + Phrase.build(Phrase.HELP_PURGE_3));
-                    Chat.sendMessage(player, Color.DARK_AQUA + "| " + Color.GREY + "r:<world> " + Color.WHITE + "- " + Phrase.build(Phrase.HELP_PURGE_4));
+                    Chat.sendMessage(player, Color.DARK_AQUA + "| " + Color.GREY + "r:<world/radius> " + Color.WHITE + "- " + Phrase.build(Phrase.HELP_PURGE_4));
                     Chat.sendMessage(player, Color.DARK_AQUA + "| " + Color.GREY + "i:<include> " + Color.WHITE + "- " + Phrase.build(Phrase.HELP_PURGE_5));
+                    Chat.sendMessage(player, Color.DARK_AQUA + "| " + Color.GREY + "e:<exclude> " + Color.WHITE + "- " + Phrase.build(Phrase.HELP_PURGE_6));
+                    Chat.sendMessage(player, Color.DARK_AQUA + "| " + Color.GREY + "a:kill " + Color.WHITE + "- " + Phrase.build(Phrase.HELP_PURGE_7));
                     Chat.sendMessage(player, Color.GREY + Color.ITALIC + Phrase.build(Phrase.HELP_PURGE_2, "/co purge t:30d"));
                 }
                 else if (helpcommand.equals("reload")) {
@@ -100,7 +102,7 @@ public class HelpCommand {
                     Chat.sendMessage(player, Color.GREY + Color.ITALIC + Phrase.build(Phrase.HELP_ACTION_2));
                 }
                 else if (helpcommand.equals("f") || helpcommand.equals("filter") || helpcommand.equals("ffilter")) {
-                    Chat.sendMessage(player, Color.DARK_AQUA + "/co lookup a:<chat|command> f:<filter> " + Color.WHITE + "- " + Phrase.build(Phrase.HELP_FILTER_1));
+                    Chat.sendMessage(player, Color.DARK_AQUA + "/co lookup a:<chat|command|sign> f:<filter> " + Color.WHITE + "- " + Phrase.build(Phrase.HELP_FILTER_1));
                     Chat.sendMessage(player, Color.GREY + Color.ITALIC + Phrase.build(Phrase.HELP_FILTER_2));
                 }
                 else if (helpcommand.equals("i") || helpcommand.equals("include") || helpcommand.equals("iinclude") || helpcommand.equals("b") || helpcommand.equals("block") || helpcommand.equals("blocks") || helpcommand.equals("bblock") || helpcommand.equals("bblocks")) {

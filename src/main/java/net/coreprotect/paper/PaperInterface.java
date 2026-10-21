@@ -5,9 +5,14 @@ import java.util.List;
 import org.bukkit.Location;
 import org.bukkit.Server;
 import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
 import org.bukkit.block.Sign;
 import org.bukkit.block.Skull;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Player;
 import org.bukkit.entity.Villager;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
@@ -18,11 +23,19 @@ public interface PaperInterface {
 
     public InventoryHolder getHolder(Inventory holder, boolean useSnapshot);
 
+    public BlockState getBlockState(Block block, boolean useSnapshot);
+
     public boolean isStopping(Server server);
 
     public double getAverageTickTime(Server server);
 
+    public boolean isCopperGolemInteracting(Entity entity);
+
     public String getLine(Sign sign, int line);
+
+    public Boolean getSignInteractionSide(Sign sign, Player player);
+
+    public boolean isAttached(Block block, Block scanBlock, BlockData blockData, int scanMin);
 
     public void teleportAsync(Entity entity, Location location);
 
@@ -35,6 +48,10 @@ public interface PaperInterface {
     public boolean executeEntityTask(Plugin plugin, Entity entity, Runnable task, Runnable retiredTask);
 
     public boolean executeEntityTask(Plugin plugin, Entity entity, Runnable task, Runnable retiredTask, long delayTicks);
+
+    public boolean getEntityMeta(LivingEntity entity, List<Object> info);
+
+    public boolean setEntityMeta(Entity entity, Object value, int count);
 
     public String getSkullOwner(Skull skull);
 
