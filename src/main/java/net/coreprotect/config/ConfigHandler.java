@@ -90,6 +90,8 @@ public class ConfigHandler extends Queue {
 
     public static int SERVER_VERSION = 0;
     public static final int EDITION_VERSION = 2;
+    // Logical database schema version, independent of the Maven/plugin version.
+    public static final String DATABASE_VERSION = "25.1";
     public static final String EDITION_BRANCH = VersionUtils.getBranch();
     public static final String EDITION_NAME = VersionUtils.getPluginName();
     public static final String COMMUNITY_EDITION = "Community Edition";

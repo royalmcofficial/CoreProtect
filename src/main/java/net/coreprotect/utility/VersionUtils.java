@@ -27,19 +27,20 @@ public class VersionUtils {
         return version;
     }
 
+    /** Returns the logical schema version used for persisted database patches. */
     public static Integer[] getInternalPluginVersion() {
         int major = ConfigHandler.EDITION_VERSION;
         int minor = 0;
         int revision = 0;
 
-        String pluginVersion = getPluginVersion();
-        if (pluginVersion.contains(".")) {
-            String[] versionSplit = pluginVersion.split("\\.");
+        String databaseVersion = ConfigHandler.DATABASE_VERSION;
+        if (databaseVersion.contains(".")) {
+            String[] versionSplit = databaseVersion.split("\\.");
             minor = Integer.parseInt(versionSplit[0]);
             revision = Integer.parseInt(versionSplit[1]);
         }
         else {
-            minor = Integer.parseInt(pluginVersion);
+            minor = Integer.parseInt(databaseVersion);
         }
 
         return new Integer[] { major, minor, revision };
