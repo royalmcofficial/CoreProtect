@@ -4,7 +4,8 @@
   <artifactId>coreprotect</artifactId>
   <version>24.1-SNAPSHOT</version>
   <properties>
-    <project.branch>development</project.branch>
+    <!-- Keep runtime migrations enabled; SNAPSHOT is a Maven version qualifier. -->
+    <project.branch></project.branch>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <skipTests>true</skipTests>
     <maven.compiler.release>11</maven.compiler.release>
