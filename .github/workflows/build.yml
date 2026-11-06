@@ -32,7 +32,14 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)" >> $GITHUB_OUTPUT
+        run: |
+          echo "VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)" >> "$GITHUB_OUTPUT"
+          echo "FINAL_NAME=$(mvn help:evaluate -Dexpression=project.build.finalName -q -DforceStdout)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify shaded artifact
+        env:
+          SHADED_JAR: target/${{ steps.version.outputs.FINAL_NAME }}.jar
+        run: test -f "$SHADED_JAR"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -40,5 +47,6 @@ jobs:
           tag_name: v${{ steps.version.outputs.VERSION }}-${{ github.run_number }}
           name: v${{ steps.version.outputs.VERSION }} (build ${{ github.run_number }})
           body: "Automated build from commit ${{ github.sha }}"
-          files: target/*.jar
+          files: target/${{ steps.version.outputs.FINAL_NAME }}.jar
+          fail_on_unmatched_files: true
           prerelease: true
